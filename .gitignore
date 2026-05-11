@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+.venv/
+
+# OS / editor
+.DS_Store
+.vscode/
+
+# Generated outputs
+outputs/*.png
+outputs/*.gif
+
+# Matplotlib cache (if any)
+.mplconfigdir/
