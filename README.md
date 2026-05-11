@@ -1,17 +1,26 @@
 # qthack — 3‑Port Non‑Reciprocal RF Network Simulation
 
-A small, self-contained Python project that models a **non-ideal 3-port RF circulator** using an **S-parameter (scattering matrix)** representation, solves the **steady-state power-wave response** under arbitrary port mismatches, and computes common RF metrics (insertion loss, isolation, return loss) plus basic power/efficiency reporting.
+A self-contained Python project that models a **non-ideal 3-port RF circulator** using an **S-parameter (scattering matrix)** representation, solves the **steady-state power-wave response** under arbitrary port mismatches, and computes common RF metrics (insertion loss, isolation, return loss) along with power/efficiency reporting.
+
+---
 
 ## Table of Contents
 
 - [Overview](#overview)
 - [Architecture](#architecture)
-- [How It Works](#how-it-works)
-- [Metrics](#metrics)
+- [Theory & Math](#theory--math)
+- [Code Walkthrough](#code-walkthrough)
+  - [`device.py` — S-Matrix Model](#devicepy--s-matrix-model)
+  - [`simulator.py` — Steady-State Solver](#simulatorpy--steady-state-solver)
+  - [`metrics.py` — RF Performance Metrics](#metricspy--rf-performance-metrics)
+  - [`visualization.py` — Plotting](#visualizationpy--plotting)
+  - [`main.py` — Entrypoint](#mainpy--entrypoint)
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
 - [Outputs](#outputs)
 - [Project Structure](#project-structure)
+
+---
 
 ## Overview
 
@@ -22,80 +31,79 @@ This repo simulates a 3-port circulator with realistic non-idealities:
 - **Finite match** at each port (return loss)
 - **Phase shifts** applied to through/leakage/reflection terms
 
-The default run:
-- Builds a clockwise circulator device
-- Injects a complex source wave into **Port 1**
-- Applies small nonzero load reflection coefficients (mismatches) on all ports
-- Solves steady state and prints:
-  - Per-port output powers and total output power
-  - Isolation and return loss per input port
-  - An overall efficiency estimate
+A default run:
+1. Builds a clockwise circulator device
+2. Injects a complex source wave into **Port 1**
+3. Applies small nonzero load reflection coefficients (mismatches) on all ports
+4. Solves steady state and prints:
+   - Per-port output powers and total output power
+   - Isolation and return loss per input port
+   - Overall efficiency estimate
+
+---
 
 ## Architecture
 
-Data flow in a typical run:
+```
+┌─────────────┐     ┌──────────────────┐     ┌──────────────┐     ┌────────────────┐
+│ device.py   │ ──▶ │ simulator.py     │ ──▶ │ metrics.py   │ ──▶ │ visualization  │
+│ S-matrix    │     │ Steady-state     │     │ IL/Iso/RL    │     │ Plots → PNG    │
+└─────────────┘     │ (I − SΓ)b = Sa   │     └──────────────┘     └────────────────┘
+                    └──────────────────┘
+```
 
-1. `device.Circulator` builds a non-ideal 3×3 complex S-matrix
-2. `simulator.NetworkSimulator` solves the steady-state power-wave equations
-3. `metrics.rf_performance_report` and `metrics.circulator_port_metrics` compute dB metrics and power summaries
-4. `visualization` generates plots to disk using a headless Matplotlib backend
+---
 
-## How It Works
+## Theory & Math
 
-### Power-wave steady-state solve
+### Power-Wave Convention
 
-The simulator uses the standard power-wave convention:
+Each port has an **incident wave** $a_i$ and a **reflected wave** $b_i$. The S-matrix relates them:
 
-- $\mathbf{b} = \mathbf{S}\,\mathbf{a}$
+$$\mathbf{b} = \mathbf{S}\,\mathbf{a}$$
 
-and models load mismatch using a diagonal reflection matrix $\Gamma$:
+Power flowing **out** of port $i$ is $|b_i|^2$ (normalized).
 
-- $\mathbf{a} = \mathbf{a}_{\text{source}} + \Gamma\,\mathbf{b}$
+### Load Mismatch via Reflection Matrix
 
-Substituting and solving gives a single linear system that implicitly includes all repeated reflections:
+A non-ideal load at port $i$ reflects part of $b_i$ back as additional incident wave. With a diagonal reflection matrix $\Gamma = \text{diag}(\Gamma_1, \Gamma_2, \Gamma_3)$:
 
-- $(\mathbf{I} - \mathbf{S}\Gamma)\,\mathbf{b} = \mathbf{S}\,\mathbf{a}_{\text{source}}$
+$$\mathbf{a} = \mathbf{a}_{\text{source}} + \Gamma\,\mathbf{b}$$
 
-This is implemented in `NetworkSimulator.propagate()`.
+### Steady-State Solve
 
-### Circulator S-matrix model
+Substituting $\mathbf{a}$ into $\mathbf{b} = \mathbf{S}\mathbf{a}$:
 
-The circulator is constructed as a 3×3 complex S-matrix:
+$$\mathbf{b} = \mathbf{S}(\mathbf{a}_{\text{source}} + \Gamma\mathbf{b})$$
 
-- Off-diagonal “forward” terms implement the intended circulation direction (clockwise or counterclockwise)
-- Reverse terms implement finite isolation leakage
-- Diagonal terms implement finite return loss
+$$(\mathbf{I} - \mathbf{S}\Gamma)\,\mathbf{b} = \mathbf{S}\,\mathbf{a}_{\text{source}}$$
 
-See `Circulator.s_matrix()`.
+This single linear solve **implicitly captures all infinite re-reflections** between device and loads.
 
-## Metrics
+### Metrics
 
-The project reports common RF quantities derived from S-parameters:
-
-- **Insertion loss** (positive dB): $\mathrm{IL}_{ij} = -20\log_{10}(|S_{ij}|)$
-- **Isolation** (positive dB): computed the same way on the “should-be-blocked” path
-- **Return loss** (positive dB): $\mathrm{RL}_{ii} = -20\log_{10}(|S_{ii}|)$
-
-Power is computed from normalized power-waves, so per-port output power is simply $|b_i|^2$.
+| Metric | Formula | Meaning |
+|---|---|---|
+| **Insertion Loss** | $\mathrm{IL}_{ij} = -20\log_{10}\|S_{ij}\|$ | Loss on intended path |
+| **Isolation** | $\mathrm{Iso}_{ij} = -20\log_{10}\|S_{ij}\|$ | Attenuation on blocked path |
+| **Return Loss** | $\mathrm{RL}_{ii} = -20\log_{10}\|S_{ii}\|$ | Port match quality |
+    
+---
 
 ## Quick Start
 
 ### Prerequisites
-
 - Python **3.10+**
 
-### Install dependencies
-
-This project is a few pure-Python files; install the runtime deps into a virtual environment:
+### Install
 
 ```bash
 python3 -m venv venv
 source venv/bin/activate
-
 pip install numpy matplotlib
 ```
 
-Optional (only needed if you want to save animations via Pillow):
+Optional (for animated GIFs):
 
 ```bash
 pip install pillow
@@ -107,36 +115,48 @@ pip install pillow
 python3 main.py
 ```
 
-The script prints the S-matrix and computed metrics, and writes plot images into `outputs/`.
+Prints the S-matrix, computed metrics, and writes PNG plots into `outputs/`.
+
+---
 
 ## Configuration
 
-The simplest knobs live in `create_circulator()` in `main.py`:
+Tunable knobs in `create_circulator()` (in `main.py`):
 
-- `insertion_loss_db`: intended forward-path loss (positive dB value)
-- `isolation_db`: reverse leakage attenuation (positive dB value)
-- `return_loss_db`: port match quality (positive dB value)
-- `direction`: `"clockwise"` or `"counterclockwise"`
-- `phase_shift_deg`, `leakage_phase_shift_deg`, `reflection_phase_shift_deg`
+| Parameter | Description |
+|---|---|
+| `insertion_loss_db` | Forward-path loss (positive dB) |
+| `isolation_db` | Reverse leakage attenuation (positive dB) |
+| `return_loss_db` | Port match quality (positive dB) |
+| `direction` | `"clockwise"` or `"counterclockwise"` |
+| `phase_shift_deg` | Phase on through path |
+| `leakage_phase_shift_deg` | Phase on reverse leakage |
+| `reflection_phase_shift_deg` | Phase on diagonal reflection |
 
-You can also change the load mismatch vector in `run_port_1_simulation()`:
+In `run_port_1_simulation()` you can adjust:
 
-- `load_gamma`: per-port complex reflection coefficient $\Gamma_i$
+- `a_source` — incident wave injection (which port, complex amplitude)
+- `load_gamma` — complex reflection coefficient per port
+
+---
 
 ## Outputs
 
 A default run generates:
 
 - `outputs/s_matrix_heatmap.png` — heatmap of $20\log_{10}|S_{ij}|$
-- `outputs/output_power_bar.png` — bar chart of normalized per-port output power $|b_i|^2$
+- `outputs/output_power_bar.png` — bar chart of $|b_i|^2$ per port
 
-The plotting code forces a headless Matplotlib backend (`Agg`) so it can run without a GUI.
+---
 
 ## Project Structure
 
-- `main.py` — entrypoint that builds the device, runs the solve, prints metrics, and generates plots
-- `device.py` — circulator and generic `RFDevice` S-matrix models
-- `simulator.py` — steady-state signal-flow solver (`NetworkSimulator`) and `SignalState`
-- `metrics.py` — helper functions for insertion loss / isolation / return loss and summary reporting
-- `visualization.py` — plotting helpers (S-matrix heatmap, output power chart, optional animation)
-- `outputs/` — generated artifacts (plots)
+```
+qthack/
+├── main.py             # Entrypoint: builds device, runs solve, prints metrics, plots
+├── device.py           # RFDevice / Circulator S-matrix models
+├── simulator.py        # NetworkSimulator + SignalState (steady-state solver)
+├── metrics.py          # IL / Isolation / Return Loss helpers + report
+├── visualization.py    # Headless Matplotlib plotting helpers
+└── outputs/            # Generated PNGs
+```
